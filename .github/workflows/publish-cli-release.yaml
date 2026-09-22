@@ -1,0 +1,40 @@
+name: Publish CLI Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: github.repository == 'hilmoo/Maestro'
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: 17
+          cache: gradle
+
+      - name: Build maestro-cli distribution
+        run: ./gradlew :maestro-cli:distZip --no-daemon --no-parallel
+
+      - name: Read CLI version
+        run: |
+          echo "CLI_VERSION=$(grep -w CLI_VERSION maestro-cli/gradle.properties | cut -d'=' -f2)" >> "$GITHUB_ENV"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="cli-${CLI_VERSION}-run${{ github.run_number }}"
+          gh release create "$TAG" \
+            maestro-cli/build/distributions/maestro.zip \
+            --title "Maestro CLI $CLI_VERSION (build ${{ github.run_number }})" \
+            --notes "Built from commit ${{ github.sha }}. Unzip and run bin/maestro (or bin/maestro.bat on Windows)."
