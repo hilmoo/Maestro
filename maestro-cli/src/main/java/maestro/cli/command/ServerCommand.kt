@@ -25,9 +25,10 @@ import java.util.concurrent.Callable
     name = "server",
     description = [
         "Starts an HTTP server exposing Maestro functionality over HTTP. " +
-            "GET /inspect?device_id=<id> returns the same compact JSON as the inspect_screen MCP tool. " +
+            "GET /inspect returns the same compact JSON as the inspect_screen MCP tool, " +
+            "using the device given by --device-id. " +
             "GET /list-device returns the same device list as the list_devices MCP tool. " +
-            "Configure the bind address via the HOST and PORT environment variables (defaults: localhost:8000)."
+            "Configure the bind address and default device via --host, --port and --device-id."
     ],
 )
 class ServerCommand : Callable<Int> {
@@ -38,13 +39,28 @@ class ServerCommand : Callable<Int> {
     )
     private var workingDir: File? = null
 
+    @CommandLine.Option(
+        names = ["--host"],
+        description = ["Host/address to bind the server to (default: localhost)"]
+    )
+    private var host: String = "localhost"
+
+    @CommandLine.Option(
+        names = ["--port"],
+        description = ["Port to bind the server to (default: 8000)"]
+    )
+    private var port: Int = 8000
+
+    @CommandLine.Option(
+        names = ["--device-id"],
+        description = ["Default device id used by /inspect"]
+    )
+    private var deviceId: String? = null
+
     override fun call(): Int {
         if (workingDir != null) {
             WorkingDirectory.baseDir = workingDir!!.absoluteFile
         }
-
-        val host = System.getenv("HOST")?.takeIf { it.isNotBlank() } ?: "localhost"
-        val port = System.getenv("PORT")?.toIntOrNull() ?: 8000
 
         val sessionManager = McpMaestroSessionManager()
         Runtime.getRuntime().addShutdownHook(Thread { sessionManager.close() })
@@ -52,10 +68,10 @@ class ServerCommand : Callable<Int> {
         val server = embeddedServer(Netty, host = host, port = port) {
             routing {
                 get("/inspect") {
-                    val deviceId = call.request.queryParameters["device_id"]
-                    if (deviceId.isNullOrBlank()) {
+                    val currentDeviceId = deviceId
+                    if (currentDeviceId.isNullOrBlank()) {
                         call.respondText(
-                            "device_id is required",
+                            "No device id configured; start the server with --device-id <id>",
                             ContentType.Text.Plain,
                             HttpStatusCode.BadRequest
                         )
@@ -63,7 +79,7 @@ class ServerCommand : Callable<Int> {
                     }
 
                     try {
-                        val result = sessionManager.withSession(deviceId = deviceId) { session ->
+                        val result = sessionManager.withSession(deviceId = currentDeviceId) { session ->
                             val viewHierarchy = runBlocking { session.maestro.viewHierarchy() }
                             ViewHierarchyFormatters.extractCompactJsonOutput(viewHierarchy.root, session.platform)
                         }
